@@ -1,0 +1,201 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+#plt.style.use('ggpolot')
+
+S0 = 100
+T = 1
+sigma = 2
+dt = T/200
+q0 = 0 # initial inventory
+gamma = 0.1 # risk aversion
+axk = 1.5 # liquidity factor
+alpha = 1.4 # market order dist param
+lambdaL = 196 # market order frequency a day (T) = total volume / averegre size of market orders
+
+A = lambdaL / alpha
+nSim = 1000
+
+# st1 = asymmetric inventory mgt
+inventory_st1 = [q0] * nSim
+pnl_st1 = [0] * nSim
+
+# st2 = symmetic invenroty mgt 
+inventory_st2 = [q0] * nSim
+pnl_st2 = [0] * nSim
+
+
+# price plotting variables
+price_ask = [0] * (int(T/dt) +1)
+price_bid = [0] * (int(T/dt) +1)
+price_mid = [0] * (int(T/dt) +1)
+
+### Optimal Spread ###
+optimal_spread = 2 * np.log(1+gamma/axk)/gamma
+
+# intensity for limit order traded #
+prob = A * np.exp(-axk*optimal_spread /2)*dt
+
+######################
+##### Simulation #####
+######################
+limitBuyCnt = 0
+limitSellCnt = 0
+marketBuyCnt = 0
+marketSellCnt = 0
+
+for i in range(nSim):
+    # mid price = random walk, +1 or -1 * sigma* sqrt(dt)
+    white_noise = sigma* np.sqrt(dt) * np.random.choice([1,-1], int(T/dt))
+    price_process = S0 + np.cumsum(white_noise)
+    price_process = np.insert(price_process, 0, S0)
+
+    for step, s in enumerate(price_process):
+        # Reservation Price
+        reservation_price = s-inventory_st1[i] * gamma * sigma**2*(T-step*dt)
+        spread = np.log(1+gamma/ axk) / gamma
+    
+        # asymmetic spreads, but it is same ? #
+        if reservation_price >= s:
+            ask_spread = spread+(reservation_price-s)
+            bid_spread = spread-(reservation_price-s)
+        else:
+            ask_spread = spread-(s-reservation_price)
+            bid_spread = spread+(s-reservation_price)
+    
+        # execution #
+        if ask_spread >0 and bid_spread >0:
+            # boths limit order
+            ask_prob = A * np.exp(-axk * ask_spread) *dt
+            bid_prob = A * np.exp(-axk*bid_spread)* dt
+            ask_prob - max(0, min(ask_prob, 1))
+            bid_prob - max(0, min(bid_prob, 1))
+        
+            ask_action_st1 = np.random.choice([1,0], p=[ask_prob, 1-ask_prob])
+            bid_action_st1 = np.random.choice([1,0], p=[bid_prob, 1-bid_prob])
+        
+            inventory_st1[i] -= ask_action_st1 # prob(limit) ask => inventory short
+            pnl_st1[i] += ask_action_st1 * (s + ask_spread)
+        
+            inventory_st1[i] += bid_action_st1 # prob(limit) bid => inventory long
+            pnl_st1[i] -= bid_action_st1 * (s- bid_spread)
+        
+            if ask_action_st1 ==1:
+                limitSellCnt+=1
+            if bid_action_st1 ==1:
+                limitBuyCnt +=1
+                
+        elif ask_spread <0 and bid_spread>0:
+               # ask market, bid limit order
+            bid_prob = A * np.exp(-axk*bid_spread) * dt
+            bid_prob = max(0, min(bid_prob, 1))
+            bid_action_st1 = np.random.choice([1,0], p=[bid_prob, 1-bid_prob])
+        
+            inventory_st1[i] -= 1 # 100% prob ask market => inventory short
+            pnl_st1[i] += 1 * (s+ask_spread)
+        
+            inventory_st1[i] += bid_action_st1 # bid => inventory long
+            pnl_st1[i] -= bid_action_st1 * (s- bid_spread)
+            if bid_action_st1 ==1:
+                limitBuyCnt +=1
+            marketSellCnt +=1
+        
+        elif ask_spread >0 and bid_spread <0:
+            # ask limit order, bid market
+             # ask market, bid limit order
+            ask_prob = A * np.exp(-axk*ask_spread) * dt
+            ask_prob = max(0, min(ask_prob, 1))
+            ask_action_st1 = np.random.choice([1,0], p=[ask_prob, 1-ask_prob])
+        
+            inventory_st1[i] -= ask_action_st1 # bid => inventory long
+            pnl_st1[i] += ask_action_st1 * (s+ask_spread)
+        
+            inventory_st1[i] += 1 # 100% prob ask market => inventory short
+            pnl_st1[i] -= 1 * (s-bid_spread)
+            if ask_action_st1 ==1:
+                limitSellCnt +=1
+            marketBuyCnt +=1
+        else:
+        # boths market 
+            inventory_st1[i] -=1
+            pnl_st1[i] += 1 * (s+ask_spread)
+            inventory_st1[i] += 1
+            pnl_st1[i] -= 1 * (s-bid_spread)
+            marketBuyCnt +=1
+            marketSellCnt +=1
+            
+        ### symmetric strategy ###
+        ### same optimial spread, but centered mid price ###
+        ask_action_st2 = np.random.choice([1,0], p=[prob, 1-prob])
+        bid_action_st2 = np.random.choice([1,0], p=[prob, 1-prob])
+        inventory_st2[i] -= ask_action_st2 #limit morder
+        pnl_st2[i] += ask_action_st2 * (s+optimal_spread/2)
+        inventory_st2[i] += bid_action_st2 #limit order
+        pnl_st2[i] -= bid_action_st2*(s-optimal_spread/2)
+
+        if i==0:
+            price_ask[step] = s + ask_spread
+            price_bid[step] = s - bid_spread
+            price_mid[step] = s
+   
+    # Rest inventory cleared at last midprice 
+    pnl_st1[i] += inventory_st1[i] * s
+    pnl_st2[i] += inventory_st2[i] * s
+    
+    if i%10 ==0:
+        print("Simulation %d : done" % i)
+        
+
+
+
+#### Visulization ####
+
+x_range = [-50, 150]
+y_range = [0,300]
+plt.figure(figsize=(12,6))
+bins = np.arange(x_range[0], x_range[1]+1, 4)
+plt.hist(pnl_st1, bins=bins, alpha = 0.25, label = "Inventory Strategy ")
+plt.hist(pnl_st2, bins=bins, alpha = 0.25, label = "Symmetric Strategy ")
+plt.ylabel('PnL')
+plt.legend()
+plt.axis(x_range + y_range)
+plt.title("PnL Histogram of the two Strategies")
+plt.show()
+
+x_range = [-50, 50]
+y_range = [0, 300]
+plt.figure(figsize=(12,6))
+bins = np.arange(x_range[0], x_range[1]+1,2)
+plt.hist(inventory_st1, bins=bins, alpha = 0.25, label="Inventory Strategy")
+plt.hist(inventory_st2, bins=bins, alpha = 0.25, label="Syemmetric Strategy")
+plt.ylabel('Inventory')
+plt.legend()
+plt.axis(x_range+y_range)
+plt.title("Inventory Hist of the two Strategies")
+plt.show()
+
+x=np.arange(0, T+dt, dt)
+plt.figure(figsize = (12,6))
+plt.plot(x, price_ask, linewidth = 1.0, linestyle="-", label="Ask")
+plt.plot(x, price_bid, linewidth = 1.0, linestyle="-", label="Bid")
+plt.plot(x, price_mid, linewidth = 1.0, linestyle="-", label="Mid")
+plt.legend()
+plt.title("The mid and optimal bid & ask Quotes")
+plt.show()
+
+orderCnt = [limitBuyCnt, limitSellCnt, marketBuyCnt, marketSellCnt]
+avgCnt = [x/ nSim for x in orderCnt]
+plt.bar(['Limit Buy', 'Limit Sell', 'Market Buy','Market Sell'], avgCnt)
+plt.title('Order Types')
+plt.show()
+
+print("\nP&L - Mean of the inventory Strategy: %.2f" % np.array(pnl_st1).mean())
+print("P&L - Mean of the symmetric Strategy: %.2f" % np.array(pnl_st2).mean())
+print("P&L - Standard Deviation of the inventory strategy: %2.f" % np.sqrt(np.array(pnl_st1).var()))
+print("P&L - Standard Deviation of the symmetric strategy: %2.f" % np.sqrt(np.array(pnl_st2).var()))
+print("INV - Mean of the inventory Strategy: %.2f" % np.array(inventory_st1).mean())
+print("INV - Mean of the symmetric Strategy: %.2f" % np.array(inventory_st2).mean())
+print("INV - Standard Deviation of the inventory strategy: %2.f" % np.sqrt(np.array(inventory_st1).var()))
+print("INV - Standard Deviation of the symmetric strategy: %2.f" % np.sqrt(np.array(inventory_st2).var()))
+
+

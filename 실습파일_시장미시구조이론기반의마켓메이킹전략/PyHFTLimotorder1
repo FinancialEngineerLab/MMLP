@@ -1,0 +1,159 @@
+
+import numpy as np
+import matplotlib.pyplot as plt
+#plt.style.use('ggpolot')
+
+S0 = 100
+T = 1
+sigma = 2
+dt = T/200
+q0 = 0 # initial inventory
+gamma = 0.1 # risk aversion
+axk = 1.5 # liquidity factor
+alpha = 1.4 # market order dist param
+lambdaL = 196 # market order frequency a day (T) = total volume / averegre size of market orders
+
+A = lambdaL / alpha
+
+# st1 = asymmetric inventory mgt
+inventory_st1 = q0
+pnl_st1 = 0
+
+# st2 = symmetic invenroty mgt 
+inventory_st2 = q0
+pnl_st2 = 0
+
+# price plotting variables
+price_ask = [0] * (int(T/dt) +1)
+price_bid = [0] * (int(T/dt) +1)
+price_mid = [0] * (int(T/dt) +1)
+
+### Optimal Spread ###
+optimal_spread = 2 * np.log(1+gamma/axk)/gamma
+
+# intensity for limit order traded #
+prob = A * np.exp(-axk*optimal_spread /2)*dt
+
+######################
+##### Simulation #####
+######################
+profitTraj_st1 = []
+invTraj_st1= []
+profitTraj_st2 = []
+invTraj_st2 = []
+
+# mid price = random walk, +1 or -1 * sigma* sqrt(dt)
+white_noise = sigma* np.sqrt(dt) * np.random.choice([1,-1], int(T/dt))
+price_process = S0 + np.cumsum(white_noise)
+price_process = np.insert(price_process, 0, S0)
+
+for step, s in enumerate(price_process):
+    # Reservation Price
+    reservation_price = s-inventory_st1 * gamma * sigma**2*(T-step*dt)
+    spread = np.log(1+gamma/ axk) / gamma
+    
+    # asymmetic spreads, but it is same ? #
+    if reservation_price >= s:
+        ask_spread = spread+(reservation_price-s)
+        bid_spread = spread-(reservation_price-s)
+    else:
+        ask_spread = spread-(s-reservation_price)
+        bid_spread = spread+(s-reservation_price)
+    
+    # execution #
+    if ask_spread >0 and bid_spread >0:
+        # boths limit order
+        ask_prob = A * np.exp(-axk * ask_spread) *dt
+        bid_prob = A * np.exp(-axk*bid_spread)* dt
+        ask_prob - max(0, min(ask_prob, 1))
+        bid_prob - max(0, min(bid_prob, 1))
+        
+        ask_action_st1 = np.random.choice([1,0], p=[ask_prob, 1-ask_prob])
+        bid_action_st1 = np.random.choice([1,0], p=[bid_prob, 1-bid_prob])
+        
+        inventory_st1 -= ask_action_st1 # prob(limit) ask => inventory short
+        pnl_st1 += ask_action_st1 * (s + ask_spread)
+        
+        inventory_st1 += bid_action_st1 # prob(limit) bid => inventory long
+        pnl_st1 -= bid_action_st1 * (s- bid_spread)
+        
+    elif ask_spread <0 and bid_spread>0:
+        # ask market, bid limit order
+        bid_prob = A * np.exp(-axk*bid_spread) * dt
+        bid_prob = max(0, min(bid_prob, 1))
+        bid_action_st1 = np.random.choice([1,0], p=[bid_prob, 1-bid_prob])
+        
+        inventory_st1 -= 1 # 100% prob ask market => inventory short
+        pnl_st1 += 1 * (s+ask_spread)
+        
+        inventory_st1 += bid_action_st1 # bid => inventory long
+        pnl_st1 -= bid_action_st1 * (s- bid_spread)
+        
+        
+    elif ask_spread >0 and bid_spread <0:
+        # ask limit order, bid market
+        # ask market, bid limit order
+        ask_prob = A * np.exp(-axk*ask_spread) * dt
+        ask_prob = max(0, min(ask_prob, 1))
+        ask_action_st1 = np.random.choice([1,0], p=[ask_prob, 1-ask_prob])
+        
+        inventory_st1 -= ask_action_st1 # bid => inventory long
+        pnl_st1 += ask_action_st1 * (s+ask_spread)
+        
+        inventory_st1 += 1 # 100% prob ask market => inventory short
+        pnl_st1 -= 1 * (s-bid_spread)
+        
+    else:
+        # boths market 
+        inventory_st1 -=1
+        pnl_st1 += 1 * (s+ask_spread)
+        inventory_st1 += 1
+        pnl_st1 -= 1 * (s-bid_spread)
+    
+    profitTraj_st1.append(pnl_st1)
+    invTraj_st1.append(inventory_st1)
+    
+    
+    ### symmetric strategy ###
+    ask_action_st2 = np.random.choice([1,0], p=[prob, 1-prob])
+    bid_action_st2 = np.random.choice([1,0], p=[prob, 1-prob])
+    inventory_st2 -= ask_action_st2
+    pnl_st2 += ask_action_st2 * (s+optimal_spread/2)
+    inventory_st2 += bid_action_st2
+    pnl_st2 -= bid_action_st2*(s-optimal_spread/2)
+    
+    price_ask[step] = s + ask_spread
+    price_bid[step] = s - bid_spread
+    price_mid[step] = s
+    profitTraj_st2.append(pnl_st2)
+    invTraj_st2.append(inventory_st2)
+
+# Rest inventory cleared at last midprice 
+pnl_st1 += inventory_st1 * s
+pnl_st2 += inventory_st2 * s
+
+
+#### Visulization ####
+x = np.arange(0, T+dt, dt)
+plt.figure(figsize=(12,6))
+plt.plot(x, price_ask, linewidth = 1.0, linestyle ="-", label= "ASK")
+plt.plot(x, price_bid, linewidth = 1.0, linestyle ="-", label= "BID")
+plt.plot(x, price_mid, linewidth = 3.0, linestyle ="-", label= "MID")
+plt.legend()
+plt.title("The mid price and the optimal bid & ask quotes")
+
+plt.figure(figsize=(12,6))
+plt.plot(x, profitTraj_st1, linewidth = 1.0, linestyle = "-")
+plt.title("Inventory Strategy : Cum PnL")
+
+plt.figure(figsize=(12,6))
+plt.plot(x, invTraj_st1, linewidth = 1.0, linestyle = "-")
+plt.title("Inventory Strategy : Cum Inventory")
+
+plt.figure(figsize=(12,6))
+plt.plot(x, profitTraj_st2, linewidth = 1.0, linestyle = "-")
+plt.title("Symmetric Strategy : Cum PnL")
+
+plt.figure(figsize=(12,6))
+plt.plot(x, invTraj_st2, linewidth = 1.0, linestyle = "-")
+plt.title("Symmetric Strategy : Cum Inventory")
